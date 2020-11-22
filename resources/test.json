@@ -1,0 +1,23 @@
+{
+  "dict2": {
+    "key": 1,
+    "key1": "sssd",
+    "dict1": {
+      "key11": 2,
+      "key12": 123.2123
+    }
+  },
+  "list": [123, 321.123, "kek", "SOSED", {"kek": "cheburek"}],
+  "double": 12.5,
+  "int": 15,
+  "string": "sosat, plus, lezhat",
+  "dict": {
+    "key": 1, 
+    "key1": "sssd",
+    "dict1": {
+      "key11": 2,
+      "key12": 123.2123
+    }
+  },
+  "this_is_last_string": "this is parsed ?"
+}
