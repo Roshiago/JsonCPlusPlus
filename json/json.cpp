@@ -1,11 +1,20 @@
-#include "json.h"
-
 #include <fstream>
 #include <iostream>
 #include <sstream>
 #include <cctype>
 #include <algorithm>
-#include <cstring>
+
+#include "json.h"
+
+#define DEBUG 0
+
+#if DEBUG == 1
+    #define TODO(msg) (throw new std::runtime_error(msg))
+    #define NOT_IMPLEMENTED (TODO("NOT IMPLEMENTED YET"))
+#else
+    #define TODO(msg)
+    #define NOT_IMPLEMENTED
+#endif
 
 namespace {
     std::string& ltrim(std::string& str, const std::string& chars)
@@ -26,121 +35,195 @@ namespace {
     }
 }
 
-namespace json{
-    Value::Value(){
-        this->m_value = nullptr;
-        this->set(nullptr, data_type::NONE);
-    }
-    Value::Value(void * value, data_type type){
-        this->m_value = nullptr;
+namespace json {
+    Value::Value(void* value, ValueType type) {
         this->set(value, type);
     }
-    void Value::set(void* value, data_type type){
-        if (this->m_value){
-            delete this->m_value;
-        }
+
+    Value::Value(ValuePair& pair) {
+        this->set(pair.first, pair.second);
+    }
+
+    Value::Value(Value& pair) {
+        *this = pair;
+    }
+
+    Value::Value(Value&& pair) noexcept {
+        this->set(pair.m_value, pair.m_type);
+
+        pair.m_type = ValueType::NONE;
+        pair.m_value = nullptr;
+    }
+
+    void Value::set(void* value, ValueType type) {
+        this->reset();
+
         this->m_value = value;
         this->m_type = type;
     }
-    Value& Value::operator=(const Value& other){
-        this->clear();
+
+    Value& Value::operator=(const Value& other) {
+        this->reset();
         this->m_type = other.m_type;
-        if (this->m_type == data_type::INTEGER){
-            this->m_value = new int;
-            std::memcpy(this->m_value, other.m_value, sizeof(int));
+
+        switch (this->m_type) {
+            case ValueType::INTEGER: {
+                this->m_value = new int;
+                std::memcpy(this->m_value, other.m_value, sizeof(int));
+                break;
+            }
+
+            case ValueType::JSON: {
+                this->m_value = new JSON;
+                std::memcpy(this->m_value, other.m_value, sizeof(JSON));
+                break;
+            }
+            
+            case ValueType::DOUBLE: {
+                this->m_value = new double;
+                std::memcpy(this->m_value, other.m_value, sizeof(double));
+                break;
+            }
+
+            case ValueType::STRING: {
+                this->m_value = new double;
+                std::memcpy(this->m_value, other.m_value, sizeof(double));
+                break;
+            }
+
+            default:
+                NOT_IMPLEMENTED;
         }
-        else if (this->m_type == data_type::HASH){
-            this->m_value = new JSON::dict;
-            std::memcpy(this->m_value, other.m_value, sizeof(JSON::dict));
-        }
-        else if (this->m_type == data_type::REAL){
-            this->m_value = new double;
-            std::memcpy(this->m_value, other.m_value, sizeof(double));
-        }
-        else if (this->m_type == data_type::STRING){
-            this->m_value = new std::string;
-            std::memcpy(this->m_value, other.m_value, sizeof(std::string));
-        }   
-        else{
-            throw "NOT IMPLEMENTED!";
-        }
+
         return *this;
     }
-    Value& Value::operator=(const Value* other){
-        if (!other){
-            this->clear();
+
+    Value& Value::operator=(const Value* other) {
+        if (other == nullptr) {
+            this->reset();
             return *this;
         }
+
         *this = *other;
         return *this;
     }
-    const data_type& Value::type(){
+
+    Value& Value::operator=(const ValuePair& pair) {
+        if (pair.first == nullptr) {
+            this->reset();
+            return *this;
+        }
+
+        this->set(pair.first, pair.second);
+
+        return *this;
+    }
+
+    const ValueType& Value::type() const {
         return this->m_type;
-    } 
-    void Value::clear(){
-        if (m_value){
-            if (this->m_type == data_type::INTEGER){
-                delete static_cast<int*>(m_value);
+    }
+
+    void Value::reset() {
+        if (this->m_value == nullptr) {
+            return;
+        }
+
+        switch (this->m_type) {
+            case ValueType::INTEGER: {
+                delete static_cast<int*>(this->m_value);
+                break;
             }
-            else if (this->m_type == data_type::REAL){
-                delete static_cast<double*>(m_value);
+
+            case ValueType::JSON: {
+                delete static_cast<PtrJson>(m_value);
+                break;
             }
-            else if (this->m_type == data_type::HASH){
-                delete static_cast<JSON::dict*>(m_value);
+
+            case ValueType::DOUBLE: {
+                delete static_cast<double*>(this->m_value);
+                break;
             }
-            else if (this->m_type == data_type::STRING){
+
+            case ValueType::STRING: {
                 delete static_cast<std::string*>(m_value);
+                break;
             }
-            else if (this->m_type == data_type::LIST){
-                std::vector<Value*>* p = static_cast<std::vector<Value*>*>(this->m_value);
-                for (auto i: *p){
+
+            case ValueType::LIST: {
+                PtrList p = static_cast<PtrList>(this->m_value);
+
+                for (auto i : *p) {
                     delete i;
                 }
+
                 delete p;
+                break;
             }
-            
-            this->m_value = nullptr;
-            this->m_type = data_type::NONE;
+
+            default:
+                NOT_IMPLEMENTED;
         }
+
+        this->m_value = nullptr;
+        this->m_type = ValueType::NONE;
     }
-    std::ostream& operator<<(std::ostream& os, Value& value){
-        if (value.m_value){
-            if (value.m_type == data_type::INTEGER){
-                os << value.value<int>();
-            }
-            else if (value.m_type == data_type::REAL){
-                os << value.value<double>();
-            }
-            else if (value.m_type == data_type::HASH){
-                os << value.value<JSON>();
-            }
-            else if (value.m_type == data_type::STRING){
-                os << value.value<std::string>();
-            }
-            else if (value.m_type == data_type::LIST){
-                auto& p = value.value<std::vector<Value*>>();
-                os << "[";
-                for (auto& it: p){
-                    if (p.back() == it){
-                        os << (*it);
-                        continue;
-                    }
-                    os << (*it) << ",";
+
+    std::ostream& operator<<(std::ostream& os, Value& v) {
+        if (v.m_value == nullptr)
+        {
+            os << "<empty>";
+            return os;
+        }
+
+        switch (v.m_type)
+        {
+        case ValueType::INTEGER: {
+            os << v.value<int>();
+            break;
+        }
+
+        case ValueType::DOUBLE: {
+            os << v.value<double>();
+            break;
+        }
+
+        case ValueType::JSON: {
+            os << v.value<JSON>();
+            break;
+        }
+
+        case ValueType::STRING: {
+            os << "\"" << v.value<std::string>() << "\"";
+            break;
+        }
+
+        case ValueType::LIST: {
+            auto& p = v.value<List>();
+            os << "[";
+            for (auto& it : p) {
+                if (p.back() == it) {
+                    os << (*it);
+                    continue;
                 }
-                os << "]";
+                os << (*it) << ",";
             }
+            os << "]";
+            break;
         }
-        else {
-            os << "empty";
+
+        default:
+            NOT_IMPLEMENTED;
         }
+
         return os;
     }
-    std::ostream& operator<<(std::ostream& os, Value* value){
+
+    std::ostream& operator<<(std::ostream& os, Value* value) {
         os << *value;
         return os;
     }
-    std::ostream& operator<<(std::ostream& os, JSON& value)
-    {  
+
+    std::ostream& operator<<(std::ostream& os, JSON& value) {  
         os << "{";
         auto t = value.m_json.begin();
         while (t != value.m_json.end()) {
@@ -153,231 +236,289 @@ namespace json{
         os << "}";
         return os;
     }
-    Value::~Value(){
-        this->clear();
+
+    Value::~Value() {
+        this->reset();
     }
-    Token::Token(std::string value, token_type type){
-        this->value = value;
-        this->type = type;
-    }
-    JSON::JSON(std::string filepath){
-        if (filepath != ""){
+
+    JSON::JSON(std::string filepath) {
+        if (filepath != "") {
             this->load_from_file(filepath);
         }
     }
+
     bool JSON::load_from_file(std::string filepath){
         std::ifstream file;
         file.open(filepath);
 
-        if (file.is_open()){
+        if (file.is_open()) {
             std::stringstream ss;
             while(!file.eof()){
                 std::string str;
                 std::getline(file, str);
                 ss << str;
             }
-            auto tokens = Tokenize(ss.str());
-            Lexer(tokens, *this);
+            auto tokens = parser::Tokenize(ss.str());
+            parser::Lexer(tokens, *this);
             return true;
         }
+
         std::cout << "FILE NOT FOUND! FILE PATH: " << filepath << "\r\n";
-        return false;        
+        return false;
     }
+
     bool JSON::load_from_string(std::string json_str) {
-        auto tokens = Tokenize(json_str);
-        Lexer(tokens, *this);
+        auto tokens = parser::Tokenize(json_str);
+        parser::Lexer(tokens, *this);
         return true;
     }
+
     Value& JSON::operator[](const std::string str){
         if (m_json.find(str) == m_json.end()){
-            m_json[str] = std::unique_ptr<Value>(new Value);
+            m_json[str] = JSON::JsonValue(new Value());
         }
+
         return *m_json[str];
     }
-    JSON::~JSON(){
-    }
-    std::vector<Token> JSON::Tokenize(std::string str){
-        std::vector<Token> Tokens;
-        std::unordered_map<char, token_type> map2type;
-        std::string token = "";
-        size_t i = 0;
 
-        auto check_space = [&](char t) -> bool{
-            return isspace(t)
-                && (
-                    Tokens.back().type != token_type::QUOTE
-                    || Tokens.back().type == token_type::COLON
-                )
-                && !token.size();
+    JSON::~JSON() {
+        // TODO: remove all data from map
+    }
+
+    namespace parser {
+        struct SpecialTokens {
+            TokenType operator[](char key) {
+                switch (key) {
+                    case '(':  return TokenType::L_PAREN;
+                    case ')':  return TokenType::R_PAREN;
+                    case '{':  return TokenType::LC_BRACKET;
+                    case '}':  return TokenType::RC_BRACKET;
+                    case '[':  return TokenType::L_BRACKET;
+                    case ']':  return TokenType::R_BRACKET;
+                    case ':':  return TokenType::COLON;
+                    case ',':  return TokenType::COMMA;
+                    case '.':  return TokenType::DOT;
+                    case '\"': return TokenType::DOUBLE_QUOTE;
+                    default:   return TokenType::NONE;
+                }
+            }
+
+            bool is_special_char(char t) {
+                return (*this)[t] != TokenType::NONE;
+            }
         };
 
-        map2type['('] = token_type::LEFT_BRACKET;
-        map2type[')'] = token_type::RIGHT_BRACKET;
-        map2type['{'] = token_type::LEFT_BRACKET_F;
-        map2type['}'] = token_type::RIGHT_BRACKET_F;
-        map2type['['] = token_type::LEFT_BRACKET_S;
-        map2type[']'] = token_type::RIGHT_BRACKET_S;
-        map2type[':'] = token_type::COLON;
-        map2type[','] = token_type::COMMA;
-        map2type['.'] = token_type::DOT;
-        map2type['\"'] = token_type::QUOTE;
-        
-        while(i < str.size()){
-            char t = str[i];
-            if (map2type.find(t) != map2type.end()){
-                if (token.size()){
-                    token_type type = token_type::WORD;
-                    Tokens.push_back(Token(token, type));
-                    token = "";
+        std::vector<Token> Tokenize(std::string str) {
+            auto is_skippable = [](std::string& token, std::vector<Token>& tokens, char t) -> bool {
+                return (
+                    isspace(t)
+                    && tokens.size() > 0
+                    && (
+                        tokens.back().type != TokenType::DOUBLE_QUOTE
+                        || tokens.back().type == TokenType::COLON
+                    )
+                    && !token.size()
+                );
+            };
+            
+
+            std::vector<Token> tokens;
+            std::string token;
+
+            SpecialTokens special_tokens;
+
+            for (char t : str) {
+                if (is_skippable(token, tokens, t)) {
+                    continue;
                 }
-                token_type type = map2type[t];
+
+                if (special_tokens.is_special_char(t)) {
+                    if (token.size() > 0) {
+                        tokens.push_back(Token(token, TokenType::WORD));
+                        tokens.push_back(Token({ t }, special_tokens[t]));
+                    }
+                    else {
+                        tokens.push_back(Token({ t }, special_tokens[t]));
+                    }
+
+                    token = "";
+                    continue;
+                }
+
                 token += t;
-                Tokens.push_back(Token(token, type));
-                token = "";
-                i++;
-                continue;
             }
-            if (check_space(t)){
-                i++;
-                continue;
-            }
-            token += t;
-            i++;
+
+            return tokens;
         }
 
-        return Tokens;
-    }
-    int JSON::Lexer(std::vector<Token> tokens, dict& j){
-        size_t i = 0;
-        auto check_key = [&](Token& token)-> bool{
-            return token.type == token_type::QUOTE // check if this is not string structure
+        size_t Lexer(std::vector<Token>& tokens, JSON& out_json) {
+            VectorView<Token> view = tokens;
+            return Lexer(view, out_json);
+        }
+
+        size_t Lexer(VectorView<Token>& tokens, JSON& out_json) {
+            size_t i = 0;
+
+            std::cout << "LEXER: " << out_json << std::endl;
+
+            auto check_token = [&](Token& token)-> bool {
+                return 
+                    token.type == TokenType::DOUBLE_QUOTE // check if this is not string structure
                     && (
                         i == 0 // if starting point, this is true
                         || (i > 0) // if this is value
-                        && tokens[i-1].type != token_type::COLON // check not : because this is must be a value
+                        && tokens[i - 1].type != TokenType::COLON // check not : because this is must be a value
                     );
-        };
+            };
 
-        auto parseHash = [&]()-> dict*{
-            dict* temp_dict = new dict();
-            i += Lexer(std::vector<Token>(tokens.cbegin() + i, tokens.cend()), *temp_dict);
-            return temp_dict;
-        };
+            auto parseInnerJson = [&](size_t inner_index) -> PtrJson {
+                PtrJson parsed_json = new JSON();
+                VectorView<Token> view(tokens, inner_index);
 
-        auto parseStr = [&]()-> std::string* {
-            std::string temp_str = "";
-            i++;
-            Token token = tokens[i];
-            while (token.type != token_type::QUOTE) {
-                temp_str += token.value;
-                i++;
-                token = tokens[i];
-            }
-            std::string* str = new std::string(temp_str);
-            i++;
-            token = tokens[i];
-            return str;
-        };
+                // recurcive (((
+                i += Lexer(view, *parsed_json);
+                return parsed_json;
+            };
 
-        auto parseValue = [&](Token token, Value& v)-> Value* {
-            std::string temp_str;
-            while (token.type != token_type::COMMA 
-                && token.type != token_type::RIGHT_BRACKET_F 
-                && token.type != token_type::RIGHT_BRACKET_S
-            ) {
-                temp_str += token.value;
-                i++;
-                token = tokens[i];
-            }
+            auto parseStr = [&]()-> std::string* {
+                std::string temp_str;
+                ++i; // consume first quote
 
-            if (temp_str.find('.') != std::string::npos) {
-                double* d = new double();
-                *d = std::stod(temp_str);
-                v.set((void*)d, data_type::REAL);
-            }
-            else {
-                int* integer = new int();
-                *integer = std::stoi(temp_str);
-                v.set((void*)integer, data_type::INTEGER);
-            }
-            return &v;
-        };
-
-        while(i < tokens.size()){
-            auto token = tokens[i];
-            if (token.type == token_type::LEFT_BRACKET_F){
-                i++;
-                continue;
-            }
-            if (token.type == token_type::RIGHT_BRACKET_F){
-                i++;
-                break;
-            }
-            if (check_key(token)){
-                i++;
-                token = tokens[i];
-                std::string key = token.value;
-                j[key] = nullptr;
-                i+=3;
-                token = tokens[i];
-                if (token.type == token_type::LEFT_BRACKET_F){ // parse hash
-                    j[key].set((void*)(parseHash()), data_type::HASH);
-                    continue;
-                }
-                if (token.type == token_type::QUOTE) {
-                    j[key].set(parseStr(), data_type::STRING);
-                    token = tokens[i];
-                    continue;
+                for (Token token = tokens[i]; token.type != TokenType::DOUBLE_QUOTE; token = tokens[++i]) {
+                    temp_str += token.value;
                 }
 
-                if (token.type == token_type::LEFT_BRACKET_S){
-                    std::vector<Value*>* list = new std::vector<Value*>();
+                std::string* str = new std::string(temp_str);
+                ++i; // consume last quote
+                return str;
+            };
+
+            auto parseValue = [&](Value& v) -> Value* {
+                std::string possible_value;
+
+                for (
+                    Token token = tokens[i];
+                    (
+                        token.type != TokenType::COMMA
+                        && token.type != TokenType::RC_BRACKET
+                        && token.type != TokenType::R_BRACKET
+                    );
+                    token = tokens[++i]
+                ) {
+                    possible_value += token.value;
+                }
+
+                if (possible_value.find('.') != std::string::npos) {
+                    double* value = new double();
+                    *value = std::stod(possible_value);
+                    v = ValuePair{ value, ValueType::DOUBLE };
+                }
+                else {
+                    int* value = new int();
+                    *value = std::stoi(possible_value);
+                    v = ValuePair{ value, ValueType::INTEGER };
+                }
+
+                return &v;
+            };
+
+            while (i < tokens.size()) {
+                Token token = tokens[i];
+
+                if (token.type == TokenType::LC_BRACKET) {
                     i++;
-                    token = tokens[i];
-                    std::string temp_str;
-                    while(token.type != token_type::RIGHT_BRACKET_S){
-                        if (token.type == token_type::QUOTE){
-                            list->push_back(
-                                new Value(
-                                    parseStr(),
-                                    data_type::STRING
-                                )
-                            );
-                            token = tokens[i];
-                            continue;
-                        }
-                        if (token.type == token_type::LEFT_BRACKET_F) { // parse hash
-                            list->push_back(
-                                new Value(
-                                    parseHash(),
-                                    data_type::HASH
-                                )
-                            );
-                            token = tokens[i];
-                            continue;
-                        }
+                    continue;
+                }
 
-                        if (token.type != token_type::COMMA) {
-                            Value* v = parseValue(token, *(new Value()));
-                            list->push_back(v);
-                        }
-                        if (token.type == token_type::RIGHT_BRACKET_S) {
-                            break;
-                        }
-                        i++;
-                        token = tokens[i];
-                    }
-                    j[key].set((void*)(list), data_type::LIST);
+                if (token.type == TokenType::RC_BRACKET) {
+                    i++;
+                    break;
+                }
+
+                if (!check_token(token))
+                {
                     i++;
                     continue;
                 }
                 
-                // parse real or integer
-                parseValue(token, j[key]);
-                continue;
+                i++;
+                token = tokens[i];
+                std::string key = token.value;
+
+                i += 3; // this is +3 because token<key>, token<">, token<:> and than continues
+                token = tokens[i];
+
+                switch (token.type) {
+                    case TokenType::LC_BRACKET: { // parse inner json
+                        out_json[key] = ValuePair{ parseInnerJson(i), ValueType::JSON };
+                        continue;
+                    }
+
+                    case TokenType::DOUBLE_QUOTE: {
+                        out_json[key] = ValuePair{ parseStr(), ValueType::STRING };
+                        token = tokens[i];
+                        continue;
+                    }
+
+                    case TokenType::L_BRACKET: {
+                        PtrList list = new List();
+                        i++;
+                        token = tokens[i];
+                        std::string temp_str;
+
+                        while (token.type != TokenType::R_BRACKET)
+                        {
+                            switch (token.type)
+                            {
+                                case TokenType::DOUBLE_QUOTE: {
+                                    list->push_back(
+                                        new Value(
+                                            parseStr(),
+                                            ValueType::STRING
+                                        )
+                                    );
+                                    token = tokens[i];
+                                    continue;
+                                }
+
+                                case TokenType::LC_BRACKET: { // parse inner json in list
+                                    auto parsed_json = parseInnerJson(i);
+                                    std::cout << *parsed_json << std::endl;
+
+                                    list->push_back(
+                                        new Value(
+                                            parsed_json,
+                                            ValueType::JSON
+                                        )
+                                    );
+                                    token = tokens[i];
+                                    continue;
+                                }
+
+                                default: {
+                                    if (token.type != TokenType::COMMA) {
+                                        Value* v = parseValue(*(new Value()));
+                                        list->push_back(v);
+                                    }
+                                    break;
+                                }
+                            }
+
+                            i++;
+                            token = tokens[i];
+                        }
+
+                        out_json[key] = ValuePair{ list, ValueType::LIST };
+                        i++;
+                        continue;
+                    }
+                }
+
+                // parse double or integer
+                parseValue(out_json[key]);
             }
-            i++;
+
+            return i;
         }
-        return i;
     }
 }
